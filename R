@@ -1,0 +1,149 @@
+grc<-read.csv("C:\\Users\\DELL\\Downloads\\grc.csv")
+is.na(grc)
+library("dplyr")
+library(arules)
+data<-unique(grc)
+
+library(ggplot2)
+# 1. Payment Type Pie Chart
+payment_type_table <- table(data$paymentType)
+percentage <- paste0(round(100 * payment_type_table / sum(payment_type_table)), "%")
+
+pie_chart <- pie(payment_type_table, labels = percentage,
+                 main = "Pie Chart of Payment Type",
+                 col = c("steelblue1", "tomato"))
+
+legend <- legend("bottomright", legend = c("Cash", "Credit"),
+                 fill = c("steelblue1", "tomato"))
+
+# 2. Age Group Bar Chart
+age_groups <- cut(data$age, breaks = c(0, 18, 35, 50, 65, 100),
+                  labels = c("0-18", "19-35", "36-50", "51-65", "66+"))
+age_group_counts <- as.data.frame(table(age_groups))
+
+bar_chart <- barplot(age_group_counts$Freq, names.arg = age_group_counts$age_groups,
+                     main = "Barplot of Age Groups", xlab = "Age Groups",
+                     ylab = "Frequency", col = "steelblue3", cex.names = 0.8)
+
+# 3. Total Spending Boxplot
+boxplot(data$total, main = "Distribution of Total Spending", xlab = "Total")
+
+# 4. City Spending Bar Chart (ggplot2)
+city_totals <- data %>%
+  group_by(city) %>%
+  summarize(total = sum(total))
+colors <- c("steelblue", "royalblue", "orange", "forestgreen", "darkred",
+            "purple", "gold", "grey", "magenta", "darkgoldenrod")
+
+city_totals <- city_totals %>%
+  arrange(desc(total))
+
+ggplot_chart <- ggplot(city_totals, aes(x = city, y = total)) +
+  geom_bar(stat = "identity", fill = colors[1:length(city_totals$city)]) +
+  labs(title = "Total Spending by City", x = "City", y = "Total Spent") +
+  theme_classic()
+
+
+
+
+library(shiny)
+
+ui <- navbarPage(
+  title = "Data Analysis App",
+  tabPanel("Data Analysis Dashboard",
+           sidebarLayout(
+             sidebarPanel(
+               selectInput("plot_choice", "Select a Plot:",
+                           c("Payment Type Pie Chart", "Age Group Bar Chart",
+                             "Distribution of Total Spending", "Total Spending by City"))
+             ),
+             mainPanel(
+               plotOutput("selected_plot")
+             )
+           )),
+  tabPanel("K-Means Clustering",
+           sidebarLayout(
+             sidebarPanel(
+               numericInput("num_clusters", "Number of Clusters", value = 3, min = 2, max = 4),
+               actionButton("cluster", "Run K-Means")
+             ),
+             mainPanel(
+               dataTableOutput("cluster_table")
+             )
+           )),
+  tabPanel("Apriori Association Rule Mining",
+           sidebarLayout(
+             sidebarPanel(
+               sliderInput("support",
+                           "Support:",
+                           min = 0.001, max = 1, value = 0.01, step = 0.001),
+               sliderInput("confidence",
+                           "Confidence:",
+                           min = 0.001, max = 1, value = 0.01, step = 0.001),
+               actionButton("run_analysis", "Run Analysis")
+             ),
+             mainPanel(
+               tableOutput("rules_table")
+             )
+           ))
+)
+
+server <- function(input, output) {
+  
+  output$selected_plot <- renderPlot({
+    if (input$plot_choice == "Payment Type Pie Chart") {
+      payment_type_table <- table(data$paymentType)
+      percentage <- paste0(round(100 * payment_type_table / sum(payment_type_table)), "%")
+      
+      pie(payment_type_table, labels = percentage,
+          main = "Pie Chart of Payment Type",
+          col = c("steelblue1", "tomato"))
+      legend("bottomright", legend = c("Cash", "Credit"),
+             fill = c("steelblue1", "tomato"))
+    } else if (input$plot_choice == "Age Group Bar Chart") {
+      age_groups <- cut(data$age, breaks = c(0, 18, 35, 50, 65, 100),
+                        labels = c("0-18", "19-35", "36-50", "51-65", "66+"))
+      age_group_counts <- as.data.frame(table(age_groups))
+      
+      barplot(age_group_counts$Freq, names.arg = age_group_counts$age_groups,
+              main = "Barplot of Age Groups", xlab = "Age Groups",
+              ylab = "Frequency", col = "steelblue3", cex.names = 0.8)
+    } else if (input$plot_choice == "Distribution of Total Spending") {
+      boxplot(data$total, main = "Distribution of Total Spending", xlab = "Total")
+    } else if (input$plot_choice == "Total Spending by City") {
+      ggplot_chart
+    }
+  })
+  
+
+  run_kmeans <- reactive({
+    n_clusters <- input$num_clusters
+    scaled_data <- scale(data[, c("age", "total")])
+    kmeans.results <- kmeans(scaled_data, centers = n_clusters, nstart = 20)
+    data$cluster <- kmeans.results$cluster
+    return(data)
+  })
+  
+  output$cluster_table <- renderDataTable({
+    kmeans_results <- run_kmeans()
+    if (!is.null(kmeans_results)) {
+      kmeans_results[, c("customer", "age", "total", "cluster")]
+    }
+  })
+  
+  
+  observeEvent(input$run_analysis, {
+    item <- strsplit(data$items, ",")
+    items <- as(item, "transactions")
+    apriori_result <- apriori(items,
+                              parameter = list(supp = input$support,
+                                               conf = input$confidence,
+                                               minlen = 2))
+    output$rules_table <- renderTable({
+      as(apriori_result, "data.frame")
+    })
+  })
+}
+
+
+shinyApp(ui = ui, server = server)
